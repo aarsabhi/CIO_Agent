@@ -45,47 +45,49 @@ const Chat: React.FC<ChatProps> = ({ uploadedFiles }) => {
     };
 
     setMessages(prev => [...prev, newMessage]);
+    const currentInput = inputText;
     setInputText('');
     setIsLoading(true);
 
-    // Simulate API call to backend
-    setTimeout(() => {
-      // Smart responses based on keywords
-      const query = inputText.toLowerCase();
-      let response = "";
-      
-      if (query.includes('security') || query.includes('vulnerability')) {
-        response = "Based on our latest security assessment, I've identified 3 critical vulnerabilities requiring immediate attention. The authentication system needs patches within 48 hours, and we have suspicious login attempts in EU-Central region.";
-      } else if (query.includes('budget') || query.includes('cost') || query.includes('financial')) {
-        response = "Current budget analysis shows 87% efficiency with $2.3M potential savings through cloud optimization. Infrastructure spending is 8.4% over budget, but security investments are 11.25% under budget.";
-      } else if (query.includes('performance') || query.includes('uptime') || query.includes('system')) {
-        response = "System performance is strong with 99.97% uptime. However, APAC region shows 78ms latency (target: <50ms). EU-Central has 4 incidents this week, requiring infrastructure attention.";
-      } else if (query.includes('project') || query.includes('timeline')) {
-        response = "Currently tracking 5 active projects: Cloud Migration (67% complete), Zero Trust Security (45% complete), and Data Analytics Platform (85% complete). Network Infrastructure Upgrade is delayed and needs resource reallocation.";
-      } else if (query.includes('team') || query.includes('staff') || query.includes('resource')) {
-        response = "Team performance metrics show 87% efficiency. We need 2 additional developers for Q1 projects. DevOps team has resource constraints affecting project timelines. User satisfaction is at 4.2/5.";
-      } else if (query.includes('risk') || query.includes('threat')) {
-        response = "Top risks include legacy system dependencies (Critical), cybersecurity threats (High), and talent retention (Medium). Recommend accelerating modernization roadmap and enhanced security monitoring.";
-      } else {
-        const generalResponses = [
-          "I can help you analyze IT performance metrics, security incidents, budget allocation, and project status. What specific area would you like to explore?",
-          "Based on uploaded documents and real-time data, I can provide insights on system performance, security posture, and operational efficiency.",
-          "I'm monitoring 4 regions with 67,000 total users. Current focus areas include APAC latency issues and EU-Central security incidents."
-        ];
-        response = generalResponses[Math.floor(Math.random() * generalResponses.length)];
+    try {
+      // Call backend API
+      const response = await fetch('http://localhost:8000/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: currentInput,
+          uploaded_files: uploadedFiles.map(f => f.name)
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to get AI response');
       }
+
+      const data = await response.json();
       
       const assistantMessage: Message = {
         id: messages.length + 2,
-        text: response,
+        text: data.response,
         sender: 'assistant',
         timestamp: new Date(),
         files: uploadedFiles.length > 0 ? [uploadedFiles[0].name] : undefined
       };
 
       setMessages(prev => [...prev, assistantMessage]);
+    } catch (error) {
+      const errorMessage: Message = {
+        id: messages.length + 2,
+        text: "I apologize, but I'm having trouble connecting to the AI service. Please try again later.",
+        sender: 'assistant',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
