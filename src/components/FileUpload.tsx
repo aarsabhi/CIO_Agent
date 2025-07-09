@@ -63,23 +63,66 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileUpload }) => {
   };
 
   const simulateFileProcessing = (uploadedFile: UploadedFile, index: number) => {
+    // Upload file to backend
+    const uploadFile = async () => {
+      try {
+        const formData = new FormData();
+        formData.append('files', uploadedFile.file);
+
+        const response = await fetch('http://localhost:8000/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          throw new Error('Upload failed');
+        }
+
+        const result = await response.json();
+        
+        setUploadedFiles(prev => prev.map((file) => {
+          if (file.file.name === uploadedFile.file.name) {
+            return {
+              ...file,
+              progress: 100,
+              status: result.files[0]?.status === 'processed' ? 'processed' : 'error'
+            };
+          }
+          return file;
+        }));
+        
+      } catch (error) {
+        setUploadedFiles(prev => prev.map((file) => {
+          if (file.file.name === uploadedFile.file.name) {
+            return {
+              ...file,
+              progress: 0,
+              status: 'error'
+            };
+          }
+          return file;
+        }));
+      }
+    };
+
+    // Simulate progress while uploading
     const interval = setInterval(() => {
-      setUploadedFiles(prev => prev.map((file, i) => {
-        if (file.file.name === uploadedFile.file.name) {
-          const newProgress = Math.min(file.progress + 10, 100);
+      setUploadedFiles(prev => prev.map((file) => {
+        if (file.file.name === uploadedFile.file.name && file.status === 'uploading') {
+          const newProgress = Math.min(file.progress + 15, 90);
           return {
             ...file,
-            progress: newProgress,
-            status: newProgress === 100 ? 'processed' : 'uploading'
+            progress: newProgress
           };
         }
         return file;
       }));
-    }, 200);
+    }, 300);
 
-    setTimeout(() => {
+    // Start actual upload
+    uploadFile().finally(() => {
       clearInterval(interval);
-    }, 2000);
+    });
   };
 
   const removeFile = (fileName: string) => {
