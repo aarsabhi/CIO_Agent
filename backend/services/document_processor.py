@@ -1,124 +1,157 @@
-"""
-Document processing service with AI analysis
-"""
 import os
-import tempfile
-from typing import List, Dict, Any
-from ..utils.parse import FileParser, chunk_text
-from ..utils.vector_store import VectorStore, EmbeddingGenerator, create_document_chunks
-from .azure_openai import azure_openai_service
+import logging
+from typing import Dict, List, Optional
+import PyPDF2
+import docx
+import pandas as pd
+from openpyxl import load_workbook
+
+logger = logging.getLogger(__name__)
 
 class DocumentProcessor:
-    """Process and analyze documents with AI"""
-    
     def __init__(self):
-        self.file_parser = FileParser()
-        self.vector_store = VectorStore()
-        self.embedding_generator = EmbeddingGenerator()
+        self.supported_extensions = {'.pdf', '.docx', '.xlsx', '.csv', '.txt'}
     
-    async def process_file(self, file_content: bytes, filename: str, content_type: str) -> Dict[str, Any]:
-        """Process uploaded file and extract insights"""
+    def process_file(self, file_path: str) -> str:
+        """Process uploaded file and extract text content"""
         try:
-            # Save file temporarily
-            file_ext = os.path.splitext(filename)[1].lower()
+            file_extension = os.path.splitext(file_path)[1].lower()
             
-            with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as temp_file:
-                temp_file.write(file_content)
-                temp_path = temp_file.name
+            if file_extension not in self.supported_extensions:
+                raise ValueError(f"Unsupported file type: {file_extension}")
             
+            if file_extension == '.pdf':
+                return self._process_pdf(file_path)
+            elif file_extension == '.docx':
+                return self._process_docx(file_path)
+            elif file_extension == '.xlsx':
+                return self._process_xlsx(file_path)
+            elif file_extension == '.csv':
+                return self._process_csv(file_path)
+            elif file_extension == '.txt':
+                return self._process_txt(file_path)
+            
+        except Exception as e:
+            logger.error(f"Error processing file {file_path}: {str(e)}")
+            raise
+    
+    def _process_pdf(self, file_path: str) -> str:
+        """Extract text from PDF file"""
+        try:
+            with open(file_path, 'rb') as file:
+                pdf_reader = PyPDF2.PdfReader(file)
+                text = ""
+                
+                for page in pdf_reader.pages:
+                    text += page.extract_text() + "\n"
+                
+                return text.strip()
+        
+        except Exception as e:
+            logger.error(f"Error processing PDF {file_path}: {str(e)}")
+            return f"Error processing PDF: {str(e)}"
+    
+    def _process_docx(self, file_path: str) -> str:
+        """Extract text from DOCX file"""
+        try:
+            doc = docx.Document(file_path)
+            text = ""
+            
+            for paragraph in doc.paragraphs:
+                text += paragraph.text + "\n"
+            
+            # Extract text from tables
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        text += cell.text + " "
+                    text += "\n"
+            
+            return text.strip()
+        
+        except Exception as e:
+            logger.error(f"Error processing DOCX {file_path}: {str(e)}")
+            return f"Error processing DOCX: {str(e)}"
+    
+    def _process_xlsx(self, file_path: str) -> str:
+        """Extract data from XLSX file"""
+        try:
+            workbook = load_workbook(file_path, read_only=True)
+            text = ""
+            
+            for sheet_name in workbook.sheetnames:
+                sheet = workbook[sheet_name]
+                text += f"Sheet: {sheet_name}\n"
+                
+                for row in sheet.iter_rows(values_only=True):
+                    row_text = " | ".join([str(cell) if cell is not None else "" for cell in row])
+                    text += row_text + "\n"
+                
+                text += "\n"
+            
+            workbook.close()
+            return text.strip()
+        
+        except Exception as e:
+            logger.error(f"Error processing XLSX {file_path}: {str(e)}")
+            return f"Error processing XLSX: {str(e)}"
+    
+    def _process_csv(self, file_path: str) -> str:
+        """Extract data from CSV file"""
+        try:
+            df = pd.read_csv(file_path)
+            
+            # Convert DataFrame to text representation
+            text = f"CSV Data Summary:\n"
+            text += f"Rows: {len(df)}, Columns: {len(df.columns)}\n\n"
+            text += f"Columns: {', '.join(df.columns)}\n\n"
+            
+            # Add first few rows as sample
+            text += "Sample Data:\n"
+            text += df.head(10).to_string(index=False)
+            
+            # Add basic statistics for numeric columns
+            numeric_cols = df.select_dtypes(include=['number']).columns
+            if len(numeric_cols) > 0:
+                text += "\n\nNumeric Column Statistics:\n"
+                text += df[numeric_cols].describe().to_string()
+            
+            return text
+        
+        except Exception as e:
+            logger.error(f"Error processing CSV {file_path}: {str(e)}")
+            return f"Error processing CSV: {str(e)}"
+    
+    def _process_txt(self, file_path: str) -> str:
+        """Extract text from TXT file"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as file:
+                return file.read()
+        
+        except UnicodeDecodeError:
+            # Try with different encoding
             try:
-                # Parse file content
-                parsed_content = self.file_parser.parse_file(temp_path, file_ext)
-                
-                # Convert to string if needed
-                if isinstance(parsed_content, dict):
-                    content_str = str(parsed_content)
-                else:
-                    content_str = str(parsed_content)
-                
-                # Analyze with AI
-                analysis = await azure_openai_service.analyze_document(content_str, filename)
-                
-                # Create chunks for vector storage
-                chunks = create_document_chunks(content_str, filename, file_ext)
-                
-                # Generate embeddings
-                chunk_texts = [chunk['chunk_text'] for chunk in chunks]
-                embeddings = await azure_openai_service.generate_embeddings(chunk_texts)
-                
-                # Store in vector database
-                if embeddings and len(embeddings) > 0:
-                    import numpy as np
-                    embeddings_array = np.array(embeddings)
-                    self.vector_store.add_documents(embeddings_array, chunks)
-                
-                return {
-                    "filename": filename,
-                    "size": len(file_content),
-                    "type": content_type,
-                    "status": "processed",
-                    "analysis": analysis,
-                    "chunks_created": len(chunks),
-                    "content_preview": content_str[:500]
-                }
-                
-            finally:
-                # Clean up temp file
-                os.unlink(temp_path)
-                
+                with open(file_path, 'r', encoding='latin-1') as file:
+                    return file.read()
+            except Exception as e:
+                logger.error(f"Error processing TXT {file_path}: {str(e)}")
+                return f"Error processing TXT: {str(e)}"
+        
         except Exception as e:
+            logger.error(f"Error processing TXT {file_path}: {str(e)}")
+            return f"Error processing TXT: {str(e)}"
+    
+    def get_file_metadata(self, file_path: str) -> Dict:
+        """Get metadata about the processed file"""
+        try:
+            stat = os.stat(file_path)
             return {
-                "filename": filename,
-                "size": len(file_content),
-                "type": content_type,
-                "status": "error",
-                "error": str(e),
-                "analysis": None,
-                "chunks_created": 0
+                "filename": os.path.basename(file_path),
+                "size": stat.st_size,
+                "extension": os.path.splitext(file_path)[1].lower(),
+                "modified": stat.st_mtime
             }
-    
-    async def search_documents(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
-        """Search processed documents for relevant content"""
-        try:
-            # Generate query embedding
-            query_embeddings = await azure_openai_service.generate_embeddings([query])
-            
-            if not query_embeddings:
-                return []
-            
-            import numpy as np
-            query_vector = np.array(query_embeddings[0])
-            
-            # Search vector store
-            results = self.vector_store.search(query_vector, k)
-            
-            return results
-            
+        
         except Exception as e:
-            print(f"Error searching documents: {e}")
-            return []
-    
-    async def get_contextual_response(self, user_message: str, uploaded_files: List[str] = None) -> str:
-        """Get AI response with document context"""
-        try:
-            # Search for relevant document content
-            relevant_docs = await self.search_documents(user_message)
-            
-            # Build context from relevant documents
-            context = ""
-            if relevant_docs:
-                context = "Relevant document excerpts:\n\n"
-                for doc in relevant_docs[:3]:  # Use top 3 results
-                    context += f"From {doc.get('filename', 'document')}: {doc.get('chunk_text', '')[:300]}...\n\n"
-            
-            # Generate response with context
-            messages = [{"role": "user", "content": user_message}]
-            response = await azure_openai_service.chat_completion(messages, context)
-            
-            return response
-            
-        except Exception as e:
-            return f"I apologize, but I encountered an error: {str(e)}"
-
-# Global processor instance
-document_processor = DocumentProcessor()
+            logger.error(f"Error getting file metadata {file_path}: {str(e)}")
+            return {}

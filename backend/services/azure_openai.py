@@ -1,188 +1,97 @@
-"""
-Azure OpenAI service for AI chat and document analysis
-"""
 import os
-import json
-import asyncio
-from typing import List, Dict, Any, Optional
-from openai import AsyncAzureOpenAI
-from dotenv import load_dotenv
+from typing import List, Optional
+import openai
+from azure.identity import DefaultAzureCredential
+import logging
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
 class AzureOpenAIService:
-    """Service for interacting with Azure OpenAI"""
-    
     def __init__(self):
-        self.client = AsyncAzureOpenAI(
-            api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-            api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview"),
-            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
-        )
+        self.api_key = os.getenv("AZURE_OPENAI_API_KEY")
+        self.endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
         self.deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o")
-        self.embedding_deployment = "text-embedding-ada-002"  # Standard embedding model
+        self.api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2023-12-01-preview")
+        
+        if not self.api_key or not self.endpoint:
+            logger.warning("Azure OpenAI credentials not configured")
+            return
+        
+        # Configure Azure OpenAI client
+        openai.api_type = "azure"
+        openai.api_key = self.api_key
+        openai.api_base = self.endpoint
+        openai.api_version = self.api_version
     
-    async def chat_completion(
-        self, 
-        messages: List[Dict[str, str]], 
-        context: Optional[str] = None,
-        max_tokens: int = 1000,
-        temperature: float = 0.7
-    ) -> str:
-        """Generate chat completion with optional context"""
+    def generate_response(self, message: str, context: Optional[str] = None) -> str:
+        """Generate AI response using GPT-4o with optional context"""
         try:
-            # Add context to system message if provided
-            if context:
-                system_message = {
-                    "role": "system",
-                    "content": f"""You are a CIO Assistant AI helping with IT management tasks. 
-                    Use the following context to provide accurate, helpful responses:
-                    
-                    Context: {context}
-                    
-                    Provide specific, actionable insights based on the context and user query."""
-                }
-                messages = [system_message] + messages
-            else:
-                system_message = {
-                    "role": "system", 
-                    "content": """You are a CIO Assistant AI specializing in IT management, 
-                    infrastructure, security, and business technology strategy. Provide 
-                    professional, actionable insights and recommendations."""
-                }
-                messages = [system_message] + messages
+            if not self.api_key:
+                return "Azure OpenAI is not configured. Please set up your API credentials."
             
-            response = await self.client.chat.completions.create(
-                model=self.deployment_name,
+            # Prepare system message with context
+            system_message = "You are a helpful CIO assistant that provides insights on IT management, strategy, and operations."
+            if context:
+                system_message += f"\n\nRelevant context from uploaded documents:\n{context}"
+            
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": message}
+            ]
+            
+            response = openai.ChatCompletion.create(
+                engine=self.deployment_name,
                 messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature
+                max_tokens=1000,
+                temperature=0.7
             )
             
             return response.choices[0].message.content
-            
+        
         except Exception as e:
-            print(f"Error in chat completion: {e}")
-            return f"I apologize, but I'm experiencing technical difficulties. Error: {str(e)}"
+            logger.error(f"Error generating AI response: {str(e)}")
+            return f"I apologize, but I encountered an error while processing your request: {str(e)}"
     
-    async def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for text chunks"""
+    def generate_embeddings(self, text: str) -> List[float]:
+        """Generate embeddings for text using Azure OpenAI"""
         try:
-            response = await self.client.embeddings.create(
-                model=self.embedding_deployment,
-                input=texts
+            if not self.api_key:
+                return []
+            
+            response = openai.Embedding.create(
+                engine="text-embedding-ada-002",
+                input=text
             )
             
-            return [embedding.embedding for embedding in response.data]
-            
+            return response.data[0].embedding
+        
         except Exception as e:
-            print(f"Error generating embeddings: {e}")
-            # Return dummy embeddings as fallback
-            return [[0.0] * 1536 for _ in texts]
+            logger.error(f"Error generating embeddings: {str(e)}")
+            return []
     
-    async def analyze_document(self, content: str, filename: str) -> Dict[str, Any]:
-        """Analyze document content and extract insights"""
+    def generate_summary(self, text: str, max_length: int = 200) -> str:
+        """Generate a summary of the provided text"""
         try:
+            if not self.api_key:
+                return "Summary generation unavailable - Azure OpenAI not configured."
+            
             messages = [
                 {
-                    "role": "user",
-                    "content": f"""Analyze this document ({filename}) and provide:
-                    1. Key insights and findings
-                    2. Important metrics or data points
-                    3. Potential risks or concerns
-                    4. Recommendations for action
-                    
-                    Document content:
-                    {content[:4000]}  # Limit content to avoid token limits
-                    """
-                }
+                    "role": "system", 
+                    "content": f"Summarize the following text in no more than {max_length} words. Focus on key insights and actionable information."
+                },
+                {"role": "user", "content": text}
             ]
             
-            analysis = await self.chat_completion(messages, max_tokens=800)
+            response = openai.ChatCompletion.create(
+                engine=self.deployment_name,
+                messages=messages,
+                max_tokens=max_length * 2,  # Rough token estimate
+                temperature=0.3
+            )
             
-            return {
-                "filename": filename,
-                "analysis": analysis,
-                "content_preview": content[:500],
-                "word_count": len(content.split()),
-                "status": "analyzed"
-            }
-            
+            return response.choices[0].message.content
+        
         except Exception as e:
-            return {
-                "filename": filename,
-                "analysis": f"Error analyzing document: {str(e)}",
-                "content_preview": content[:500],
-                "word_count": len(content.split()),
-                "status": "error"
-            }
-    
-    async def generate_daily_brief(self, metrics: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate executive daily brief based on system metrics"""
-        try:
-            prompt = f"""Generate an executive daily brief based on these IT metrics:
-            
-            System Metrics: {json.dumps(metrics, indent=2)}
-            
-            Provide:
-            1. Key risks that need immediate attention
-            2. Notable wins and achievements
-            3. Current blockers and challenges
-            4. Executive summary with actionable recommendations
-            
-            Format as a professional executive brief."""
-            
-            messages = [{"role": "user", "content": prompt}]
-            brief_content = await self.chat_completion(messages, max_tokens=1200)
-            
-            return {
-                "date": "2024-01-15",
-                "content": brief_content,
-                "metrics_analyzed": len(metrics),
-                "generated_at": "2024-01-15T10:30:00Z"
-            }
-            
-        except Exception as e:
-            return {
-                "date": "2024-01-15",
-                "content": f"Error generating brief: {str(e)}",
-                "metrics_analyzed": 0,
-                "generated_at": "2024-01-15T10:30:00Z"
-            }
-    
-    async def generate_forecast(self, scenario: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate forecast based on scenario parameters"""
-        try:
-            prompt = f"""Generate a detailed IT forecast based on these parameters:
-            
-            Scenario: {json.dumps(scenario, indent=2)}
-            
-            Provide:
-            1. Predicted outcomes for the given time horizon
-            2. Risk factors and mitigation strategies
-            3. Budget impact analysis
-            4. Confidence intervals and assumptions
-            5. Actionable recommendations
-            
-            Format as a professional forecast report."""
-            
-            messages = [{"role": "user", "content": prompt}]
-            forecast_content = await self.chat_completion(messages, max_tokens=1200)
-            
-            return {
-                "scenario": scenario,
-                "forecast": forecast_content,
-                "confidence": "Medium-High",
-                "generated_at": "2024-01-15T10:30:00Z"
-            }
-            
-        except Exception as e:
-            return {
-                "scenario": scenario,
-                "forecast": f"Error generating forecast: {str(e)}",
-                "confidence": "Low",
-                "generated_at": "2024-01-15T10:30:00Z"
-            }
-
-# Global service instance
-azure_openai_service = AzureOpenAIService()
+            logger.error(f"Error generating summary: {str(e)}")
+            return f"Summary generation failed: {str(e)}"

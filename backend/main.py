@@ -3,11 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from typing import List, Optional
 import os
-import tempfile
-import shutil
-from datetime import datetime
-from services.azure_openai import azure_openai_service
-from services.document_processor import document_processor
+from dotenv import load_dotenv
+import uvicorn
+
+from services.document_processor import DocumentProcessor
+from services.azure_openai import AzureOpenAIService
+from utils.vector_store import VectorStore
+
+# Load environment variables
+load_dotenv()
 
 app = FastAPI(title="CIO Assistant API", version="1.0.0")
 
@@ -20,6 +24,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Initialize services
+document_processor = DocumentProcessor()
+azure_openai = AzureOpenAIService()
+vector_store = VectorStore()
+
 @app.get("/")
 async def root():
     return {"message": "CIO Assistant API is running"}
@@ -28,51 +37,46 @@ async def root():
 async def upload_files(files: List[UploadFile] = File(...)):
     """Upload and process multiple files"""
     try:
-        processed_files = []
-        
+        results = []
         for file in files:
-            # Validate file size (10MB limit)
-            if file.size and file.size > 10 * 1024 * 1024:
-                raise HTTPException(status_code=413, detail=f"File {file.filename} is too large")
+            # Save uploaded file
+            file_path = f"uploads/{file.filename}"
+            os.makedirs("uploads", exist_ok=True)
             
-            # Validate file extension
-            allowed_extensions = {'.pdf', '.docx', '.xlsx', '.csv', '.txt'}
-            file_ext = os.path.splitext(file.filename or '')[1].lower()
-            if file_ext not in allowed_extensions:
-                raise HTTPException(status_code=400, detail=f"File type {file_ext} not supported")
+            with open(file_path, "wb") as buffer:
+                content = await file.read()
+                buffer.write(content)
             
-            # Read file content
-            file_content = await file.read()
+            # Process file
+            processed_content = document_processor.process_file(file_path)
             
-            # Process file with AI
-            result = await document_processor.process_file(
-                file_content, 
-                file.filename or "unknown", 
-                file.content_type or "application/octet-stream"
-            )
+            # Add to vector store
+            vector_store.add_document(processed_content, file.filename)
             
-            result["uploaded_at"] = datetime.now().isoformat()
-            processed_files.append(result)
+            results.append({
+                "filename": file.filename,
+                "status": "processed",
+                "content_length": len(processed_content)
+            })
         
-        return {"files": processed_files, "message": "Files uploaded successfully"}
+        return {"files": results, "status": "success"}
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/chat")
 async def chat(message: dict):
-    """Chat with AI assistant"""
+    """Chat with AI assistant using RAG"""
     try:
         user_message = message.get("message", "")
-        uploaded_files = message.get("uploaded_files", [])
         
-        # Get contextual AI response
-        ai_response = await document_processor.get_contextual_response(user_message, uploaded_files)
+        # Get relevant context from vector store
+        context = vector_store.search(user_message)
         
-        return {
-            "response": ai_response,
-            "timestamp": datetime.now().isoformat()
-        }
+        # Generate AI response
+        response = azure_openai.generate_response(user_message, context)
+        
+        return {"response": response, "status": "success"}
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -81,19 +85,28 @@ async def chat(message: dict):
 async def get_daily_brief():
     """Generate daily executive brief"""
     try:
-        # Sample metrics for brief generation
-        metrics = {
-            "system_uptime": 99.8,
-            "budget_utilization": 92,
-            "team_satisfaction": 8.2,
-            "security_score": 95,
-            "active_incidents": 3,
-            "projects_on_track": 7,
-            "projects_delayed": 2
+        # Mock data for now - would integrate with real systems
+        brief = {
+            "date": "2024-01-15",
+            "risks": [
+                {"title": "Server Capacity", "severity": "high", "description": "Approaching 85% capacity"},
+                {"title": "Security Patch", "severity": "medium", "description": "Pending updates for 12 systems"}
+            ],
+            "wins": [
+                {"title": "Migration Complete", "description": "Successfully migrated 50 applications"},
+                {"title": "Cost Savings", "description": "Achieved 15% reduction in cloud costs"}
+            ],
+            "blockers": [
+                {"title": "Budget Approval", "description": "Waiting for Q2 budget approval"},
+                {"title": "Vendor Response", "description": "Pending response from security vendor"}
+            ],
+            "metrics": {
+                "uptime": "99.8%",
+                "incidents": 3,
+                "resolved": 2,
+                "budget_utilization": "78%"
+            }
         }
-        
-        # Generate AI-powered brief
-        brief = await azure_openai_service.generate_daily_brief(metrics)
         
         return brief
     
@@ -101,11 +114,28 @@ async def get_daily_brief():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/forecast")
-async def generate_forecast(scenario: dict):
+async def generate_forecast(params: dict):
     """Generate forecast scenarios"""
     try:
-        # Generate AI-powered forecast
-        forecast = await azure_openai_service.generate_forecast(scenario)
+        budget_increase = params.get("budget_increase", 0)
+        time_horizon = params.get("time_horizon", 12)
+        metric = params.get("metric", "performance")
+        
+        # Mock forecast data - would use real ML models
+        forecast = {
+            "scenario": f"{budget_increase}% budget increase over {time_horizon} months",
+            "predictions": {
+                "performance_improvement": f"{budget_increase * 0.8}%",
+                "risk_reduction": f"{budget_increase * 0.6}%",
+                "cost_efficiency": f"{budget_increase * 0.4}%"
+            },
+            "confidence": "85%",
+            "recommendations": [
+                "Focus on infrastructure automation",
+                "Invest in security monitoring tools",
+                "Expand cloud migration efforts"
+            ]
+        }
         
         return forecast
     
@@ -113,5 +143,4 @@ async def generate_forecast(scenario: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
