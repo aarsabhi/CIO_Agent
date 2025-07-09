@@ -6,6 +6,8 @@ import os
 import tempfile
 import shutil
 from datetime import datetime
+from services.azure_openai import azure_openai_service
+from services.document_processor import document_processor
 
 app = FastAPI(title="CIO Assistant API", version="1.0.0")
 
@@ -39,14 +41,18 @@ async def upload_files(files: List[UploadFile] = File(...)):
             if file_ext not in allowed_extensions:
                 raise HTTPException(status_code=400, detail=f"File type {file_ext} not supported")
             
-            # Process file (placeholder)
-            processed_files.append({
-                "filename": file.filename,
-                "size": file.size,
-                "type": file.content_type,
-                "status": "processed",
-                "uploaded_at": datetime.now().isoformat()
-            })
+            # Read file content
+            file_content = await file.read()
+            
+            # Process file with AI
+            result = await document_processor.process_file(
+                file_content, 
+                file.filename or "unknown", 
+                file.content_type or "application/octet-stream"
+            )
+            
+            result["uploaded_at"] = datetime.now().isoformat()
+            processed_files.append(result)
         
         return {"files": processed_files, "message": "Files uploaded successfully"}
     
@@ -58,9 +64,10 @@ async def chat(message: dict):
     """Chat with AI assistant"""
     try:
         user_message = message.get("message", "")
+        uploaded_files = message.get("uploaded_files", [])
         
-        # Placeholder AI response
-        ai_response = f"I understand you're asking about: {user_message}. This is a placeholder response. The AI integration will be implemented with Azure OpenAI."
+        # Get contextual AI response
+        ai_response = await document_processor.get_contextual_response(user_message, uploaded_files)
         
         return {
             "response": ai_response,
@@ -74,28 +81,19 @@ async def chat(message: dict):
 async def get_daily_brief():
     """Generate daily executive brief"""
     try:
-        # Placeholder brief data
-        brief = {
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "risks": [
-                {"title": "Server Performance", "severity": "medium", "description": "Response times increased by 15%"},
-                {"title": "Budget Variance", "severity": "high", "description": "Q4 spending 8% over budget"}
-            ],
-            "wins": [
-                {"title": "Security Audit", "description": "Completed with zero critical findings"},
-                {"title": "Team Productivity", "description": "Sprint velocity improved by 12%"}
-            ],
-            "blockers": [
-                {"title": "Vendor Approval", "description": "Waiting for legal review of new SaaS contract"},
-                {"title": "Resource Allocation", "description": "Need 2 additional developers for Q1 projects"}
-            ],
-            "metrics": {
-                "system_uptime": "99.8%",
-                "budget_utilization": "92%",
-                "team_satisfaction": "8.2/10",
-                "security_score": "95/100"
-            }
+        # Sample metrics for brief generation
+        metrics = {
+            "system_uptime": 99.8,
+            "budget_utilization": 92,
+            "team_satisfaction": 8.2,
+            "security_score": 95,
+            "active_incidents": 3,
+            "projects_on_track": 7,
+            "projects_delayed": 2
         }
+        
+        # Generate AI-powered brief
+        brief = await azure_openai_service.generate_daily_brief(metrics)
         
         return brief
     
@@ -106,27 +104,8 @@ async def get_daily_brief():
 async def generate_forecast(scenario: dict):
     """Generate forecast scenarios"""
     try:
-        budget_increase = scenario.get("budget_increase", 0)
-        time_horizon = scenario.get("time_horizon", 12)
-        metric = scenario.get("metric", "performance")
-        
-        # Placeholder forecast data
-        forecast = {
-            "scenario": {
-                "budget_increase": budget_increase,
-                "time_horizon": time_horizon,
-                "metric": metric
-            },
-            "predictions": [
-                {"month": i, "value": 100 + (i * 2) + (budget_increase * 0.5)} 
-                for i in range(1, time_horizon + 1)
-            ],
-            "confidence_interval": {
-                "lower": [95 + (i * 1.5) for i in range(1, time_horizon + 1)],
-                "upper": [105 + (i * 2.5) for i in range(1, time_horizon + 1)]
-            },
-            "generated_at": datetime.now().isoformat()
-        }
+        # Generate AI-powered forecast
+        forecast = await azure_openai_service.generate_forecast(scenario)
         
         return forecast
     

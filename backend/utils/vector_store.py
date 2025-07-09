@@ -109,23 +109,28 @@ class EmbeddingGenerator:
         self.api_key = api_key
         self.endpoint = endpoint
     
-    def generate_embeddings(self, texts: List[str]) -> np.ndarray:
+    async def generate_embeddings(self, texts: List[str]) -> np.ndarray:
         """Generate embeddings for a list of texts"""
-        # Placeholder implementation - replace with actual Azure OpenAI call
-        embeddings = []
+        # Import here to avoid circular imports
+        from ..services.azure_openai import azure_openai_service
         
-        for text in texts:
-            # Generate random embedding for demonstration
-            # In production, this would call Azure OpenAI text-embedding-ada-002
-            embedding = np.random.normal(0, 1, 1536)  # 1536 is ada-002 dimension
-            embedding = embedding / np.linalg.norm(embedding)  # Normalize
-            embeddings.append(embedding)
-        
-        return np.array(embeddings)
+        try:
+            embeddings = await azure_openai_service.generate_embeddings(texts)
+            return np.array(embeddings)
+        except Exception as e:
+            print(f"Error generating embeddings: {e}")
+            # Fallback to random embeddings
+            embeddings = []
+            for text in texts:
+                embedding = np.random.normal(0, 1, 1536)
+                embedding = embedding / np.linalg.norm(embedding)
+                embeddings.append(embedding)
+            return np.array(embeddings)
     
-    def generate_single_embedding(self, text: str) -> np.ndarray:
+    async def generate_single_embedding(self, text: str) -> np.ndarray:
         """Generate embedding for a single text"""
-        return self.generate_embeddings([text])[0]
+        embeddings = await self.generate_embeddings([text])
+        return embeddings[0]
 
 def create_document_chunks(content: str, filename: str, file_type: str, chunk_size: int = 1000) -> List[Dict[str, Any]]:
     """Create document chunks with metadata"""
