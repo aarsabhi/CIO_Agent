@@ -5,10 +5,15 @@ from typing import List, Optional
 import os
 from dotenv import load_dotenv
 import uvicorn
+import logging
 
 from services.document_processor import DocumentProcessor
 from services.azure_openai import AzureOpenAIService
 from utils.vector_store import VectorStore
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -18,20 +23,35 @@ app = FastAPI(title="CIO Assistant API", version="1.0.0")
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Initialize services
-document_processor = DocumentProcessor()
-azure_openai = AzureOpenAIService()
-vector_store = VectorStore()
+try:
+    document_processor = DocumentProcessor()
+    azure_openai = AzureOpenAIService()
+    vector_store = VectorStore()
+    logger.info("Services initialized successfully")
+except Exception as e:
+    logger.error(f"Error initializing services: {e}")
+    document_processor = DocumentProcessor()
+    azure_openai = AzureOpenAIService()
+    vector_store = VectorStore()
 
 @app.get("/")
 async def root():
-    return {"message": "CIO Assistant API is running"}
+    return {"message": "CIO Assistant API is running", "status": "healthy"}
+
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "azure_openai_configured": azure_openai.client is not None,
+        "vector_store_ready": vector_store.is_trained
+    }
 
 @app.post("/upload")
 async def upload_files(files: List[UploadFile] = File(...)):
@@ -39,29 +59,43 @@ async def upload_files(files: List[UploadFile] = File(...)):
     try:
         results = []
         for file in files:
+            # Create uploads directory if it doesn't exist
+            os.makedirs("uploads", exist_ok=True)
+            
             # Save uploaded file
             file_path = f"uploads/{file.filename}"
-            os.makedirs("uploads", exist_ok=True)
             
             with open(file_path, "wb") as buffer:
                 content = await file.read()
                 buffer.write(content)
             
             # Process file
-            processed_content = document_processor.process_file(file_path)
-            
-            # Add to vector store
-            vector_store.add_document(processed_content, file.filename)
-            
-            results.append({
-                "filename": file.filename,
-                "status": "processed",
-                "content_length": len(processed_content)
-            })
+            try:
+                processed_content = document_processor.process_file(file_path)
+                
+                # Add to vector store
+                vector_store.add_document(processed_content, file.filename)
+                
+                results.append({
+                    "filename": file.filename,
+                    "status": "processed",
+                    "content_length": len(processed_content)
+                })
+                
+                logger.info(f"Successfully processed file: {file.filename}")
+                
+            except Exception as e:
+                logger.error(f"Error processing file {file.filename}: {e}")
+                results.append({
+                    "filename": file.filename,
+                    "status": "error",
+                    "error": str(e)
+                })
         
         return {"files": results, "status": "success"}
     
     except Exception as e:
+        logger.error(f"Upload error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/chat")
@@ -69,6 +103,9 @@ async def chat(message: dict):
     """Chat with AI assistant using RAG"""
     try:
         user_message = message.get("message", "")
+        
+        if not user_message:
+            raise HTTPException(status_code=400, detail="Message is required")
         
         # Get relevant context from vector store
         context = vector_store.search(user_message)
@@ -79,6 +116,7 @@ async def chat(message: dict):
         return {"response": response, "status": "success"}
     
     except Exception as e:
+        logger.error(f"Chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/brief")
@@ -111,6 +149,7 @@ async def get_daily_brief():
         return brief
     
     except Exception as e:
+        logger.error(f"Brief generation error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/forecast")
@@ -140,7 +179,9 @@ async def generate_forecast(params: dict):
         return forecast
     
     except Exception as e:
+        logger.error(f"Forecast generation error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
+    logger.info("Starting CIO Assistant API server...")
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
