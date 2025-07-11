@@ -11,8 +11,7 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ activeView, setActiveView, user }) => {
   const menuItems = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard', badge: null },
-    { id: 'chat', icon: MessageSquare, label: 'AI Assistant', badge: null },
-    { id: 'upload', icon: Upload, label: 'File Upload', badge: null },
+    { id: 'chat-upload', icon: MessageSquare, label: 'AI Assistant', badge: null },
     { id: 'forecast', icon: TrendingUp, label: 'Forecast', badge: null },
     { id: 'heatmap', icon: Activity, label: 'Risk Heatmap', badge: 'Hot' },
     { id: 'brief', icon: FileText, label: 'Daily Brief', badge: null },

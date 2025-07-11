@@ -2,20 +2,18 @@ import React, { useState } from 'react';
 import { Settings, User, Search, LogOut } from 'lucide-react';
 import Login from './components/Login';
 import Sidebar from './components/Sidebar';
-import Chat from './components/Chat';
-import FileUpload from './components/FileUpload';
+import UnifiedChatUpload from './components/UnifiedChatUpload';
 import Dashboard from './components/Dashboard';
 import Forecast from './components/Forecast';
 import HeatmapTile from './components/HeatmapTile';
 import DailyBrief from './components/DailyBrief';
 import { User as UserType } from './data/mockData';
 
-type ActiveView = 'dashboard' | 'chat' | 'upload' | 'forecast' | 'heatmap' | 'brief';
+type ActiveView = 'dashboard' | 'chat-upload' | 'forecast' | 'heatmap' | 'brief';
 
 function App() {
   const [user, setUser] = useState<UserType | null>(null);
   const [activeView, setActiveView] = useState<ActiveView>('dashboard');
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
 
   const handleLogin = (userData: UserType) => {
     setUser(userData);
@@ -26,9 +24,6 @@ function App() {
     setActiveView('dashboard');
   };
 
-  const handleFileUpload = (files: File[]) => {
-    setUploadedFiles(prev => [...prev, ...files]);
-  };
 
   // Show login page if user is not authenticated
   if (!user) {
@@ -39,10 +34,8 @@ function App() {
     switch (activeView) {
       case 'dashboard':
         return <Dashboard user={user} />;
-      case 'chat':
-        return <Chat uploadedFiles={uploadedFiles} />;
-      case 'upload':
-        return <FileUpload onFileUpload={handleFileUpload} />;
+      case 'chat-upload':
+        return <UnifiedChatUpload />;
       case 'forecast':
         return <Forecast />;
       case 'heatmap':
