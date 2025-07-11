@@ -76,16 +76,42 @@ class DocumentProcessor:
     def _process_xlsx(self, file_path: str) -> str:
         """Extract data from XLSX file"""
         try:
-            workbook = load_workbook(file_path, read_only=True)
+            # Try with openpyxl first
+            try:
+                workbook = load_workbook(file_path, read_only=True, data_only=True)
+            except Exception as openpyxl_error:
+                logger.warning(f"openpyxl failed for {file_path}: {openpyxl_error}")
+                # Fallback to pandas
+                try:
+                    df = pd.read_excel(file_path, sheet_name=None)
+                    text = f"Excel File: {os.path.basename(file_path)}\n"
+                    for sheet_name, sheet_df in df.items():
+                        text += f"\nSheet: {sheet_name}\n"
+                        text += f"Rows: {len(sheet_df)}, Columns: {len(sheet_df.columns)}\n"
+                        text += f"Columns: {', '.join(sheet_df.columns.astype(str))}\n\n"
+                        # Add sample data
+                        text += "Sample Data:\n"
+                        text += sheet_df.head(10).to_string(index=False, na_rep='') + "\n\n"
+                    return text.strip()
+                except Exception as pandas_error:
+                    logger.error(f"Both openpyxl and pandas failed for {file_path}: {pandas_error}")
+                    return f"Error processing Excel file: Unable to read with both openpyxl and pandas. File may be corrupted or in an unsupported format."
+            
             text = ""
             
             for sheet_name in workbook.sheetnames:
                 sheet = workbook[sheet_name]
                 text += f"Sheet: {sheet_name}\n"
                 
+                row_count = 0
                 for row in sheet.iter_rows(values_only=True):
+                    if row_count > 1000:  # Limit rows to prevent memory issues
+                        text += "... (truncated for size)\n"
+                        break
                     row_text = " | ".join([str(cell) if cell is not None else "" for cell in row])
-                    text += row_text + "\n"
+                    if row_text.strip():  # Only add non-empty rows
+                        text += row_text + "\n"
+                    row_count += 1
                 
                 text += "\n"
             
@@ -94,7 +120,14 @@ class DocumentProcessor:
         
         except Exception as e:
             logger.error(f"Error processing XLSX {file_path}: {str(e)}")
-            return f"Error processing XLSX: {str(e)}"
+            # Final fallback - try to extract basic info
+            try:
+                import zipfile
+                with zipfile.ZipFile(file_path, 'r') as zip_file:
+                    file_list = zip_file.namelist()
+                    return f"Excel file structure detected. Contains {len(file_list)} internal files. File may need manual review."
+            except:
+                return f"Error processing Excel file: {str(e)}. Please ensure the file is not corrupted and is a valid Excel format."
     
     def _process_csv(self, file_path: str) -> str:
         """Extract data from CSV file"""

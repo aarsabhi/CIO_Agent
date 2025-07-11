@@ -73,23 +73,33 @@ async def upload_files(files: List[UploadFile] = File(...)):
             try:
                 processed_content = document_processor.process_file(file_path)
                 
+                if not processed_content or len(processed_content.strip()) < 10:
+                    raise Exception("File appears to be empty or unreadable")
+                
                 # Add to vector store
                 vector_store.add_document(processed_content, file.filename)
                 
                 results.append({
                     "filename": file.filename,
                     "status": "processed",
-                    "content_length": len(processed_content)
+                    "content_length": len(processed_content),
+                    "preview": processed_content[:200] + "..." if len(processed_content) > 200 else processed_content
                 })
                 
                 logger.info(f"Successfully processed file: {file.filename}")
                 
             except Exception as e:
                 logger.error(f"Error processing file {file.filename}: {e}")
+                # Clean up the failed file
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
                 results.append({
                     "filename": file.filename,
                     "status": "error",
-                    "error": str(e)
+                    "error": str(e),
+                    "suggestion": "Please ensure the file is not corrupted and is in a supported format (PDF, DOCX, XLSX, CSV, TXT)"
                 })
         
         return {"files": results, "status": "success"}
