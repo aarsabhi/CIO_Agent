@@ -76,26 +76,68 @@ class DocumentProcessor:
     def _process_xlsx(self, file_path: str) -> str:
         """Extract data from XLSX file"""
         try:
-            # Try with openpyxl first
+            # First try with pandas (more robust for complex Excel files)
             try:
-                workbook = load_workbook(file_path, read_only=True, data_only=True)
-            except Exception as openpyxl_error:
-                logger.warning(f"openpyxl failed for {file_path}: {openpyxl_error}")
-                # Fallback to pandas
+                logger.info(f"Attempting to process Excel file with pandas: {file_path}")
+                df_dict = pd.read_excel(file_path, sheet_name=None, engine='openpyxl')
+                
+                text = f"Excel File: {os.path.basename(file_path)}\n"
+                text += f"Total Sheets: {len(df_dict)}\n\n"
+                
+                for sheet_name, sheet_df in df_dict.items():
+                    text += f"=== Sheet: {sheet_name} ===\n"
+                    text += f"Dimensions: {len(sheet_df)} rows × {len(sheet_df.columns)} columns\n"
+                    
+                    # Clean column names
+                    clean_columns = []
+                    for col in sheet_df.columns:
+                        if pd.isna(col):
+                            clean_columns.append("Unnamed_Column")
+                        else:
+                            clean_columns.append(str(col).strip())
+                    
+                    text += f"Columns: {', '.join(clean_columns[:10])}"
+                    if len(clean_columns) > 10:
+                        text += f" ... and {len(clean_columns) - 10} more"
+                    text += "\n\n"
+                    
+                    # Add sample data (first 5 rows)
+                    if not sheet_df.empty:
+                        text += "Sample Data (first 5 rows):\n"
+                        sample_df = sheet_df.head(5).fillna('')
+                        
+                        # Convert to string representation
+                        for idx, row in sample_df.iterrows():
+                            row_data = []
+                            for col_idx, value in enumerate(row):
+                                if col_idx >= 10:  # Limit columns
+                                    row_data.append("...")
+                                    break
+                                row_data.append(str(value)[:50])  # Limit cell content
+                            text += f"Row {idx + 1}: {' | '.join(row_data)}\n"
+                    else:
+                        text += "Sheet is empty\n"
+                    
+                    text += "\n"
+                
+                logger.info(f"Successfully processed Excel file with pandas: {file_path}")
+                return text.strip()
+                
+            except Exception as pandas_error:
+                logger.warning(f"Pandas failed for {file_path}: {pandas_error}")
+                
+                # Fallback to openpyxl
                 try:
-                    df = pd.read_excel(file_path, sheet_name=None)
-                    text = f"Excel File: {os.path.basename(file_path)}\n"
-                    for sheet_name, sheet_df in df.items():
-                        text += f"\nSheet: {sheet_name}\n"
-                        text += f"Rows: {len(sheet_df)}, Columns: {len(sheet_df.columns)}\n"
-                        text += f"Columns: {', '.join(sheet_df.columns.astype(str))}\n\n"
-                        # Add sample data
-                        text += "Sample Data:\n"
-                        text += sheet_df.head(10).to_string(index=False, na_rep='') + "\n\n"
-                    return text.strip()
-                except Exception as pandas_error:
-                    logger.error(f"Both openpyxl and pandas failed for {file_path}: {pandas_error}")
-                    return f"Error processing Excel file: Unable to read with both openpyxl and pandas. File may be corrupted or in an unsupported format."
+                    logger.info(f"Attempting to process Excel file with openpyxl: {file_path}")
+                    workbook = load_workbook(file_path, read_only=True, data_only=True)
+                except Exception as openpyxl_error:
+                    logger.error(f"Both pandas and openpyxl failed for {file_path}")
+                    # Try one more approach - basic file info
+                    try:
+                        file_size = os.path.getsize(file_path)
+                        return f"Excel file detected but could not be processed.\nFile: {os.path.basename(file_path)}\nSize: {file_size} bytes\nError: {str(pandas_error)}\n\nPlease ensure the file is not password-protected, corrupted, or in an unsupported Excel format."
+                    except:
+                        return f"Excel file processing failed: {str(pandas_error)}"
             
             text = ""
             
@@ -120,14 +162,6 @@ class DocumentProcessor:
         
         except Exception as e:
             logger.error(f"Error processing XLSX {file_path}: {str(e)}")
-            # Final fallback - try to extract basic info
-            try:
-                import zipfile
-                with zipfile.ZipFile(file_path, 'r') as zip_file:
-                    file_list = zip_file.namelist()
-                    return f"Excel file structure detected. Contains {len(file_list)} internal files. File may need manual review."
-            except:
-                return f"Error processing Excel file: {str(e)}. Please ensure the file is not corrupted and is a valid Excel format."
     
     def _process_csv(self, file_path: str) -> str:
         """Extract data from CSV file"""

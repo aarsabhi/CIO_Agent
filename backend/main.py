@@ -71,10 +71,11 @@ async def upload_files(files: List[UploadFile] = File(...)):
             
             # Process file
             try:
+                logger.info(f"Processing file: {file.filename} (size: {len(content)} bytes)")
                 processed_content = document_processor.process_file(file_path)
                 
                 if not processed_content or len(processed_content.strip()) < 10:
-                    raise Exception("File appears to be empty or unreadable")
+                    raise Exception(f"File appears to be empty or unreadable. Content length: {len(processed_content) if processed_content else 0}")
                 
                 # Add to vector store
                 vector_store.add_document(processed_content, file.filename)
@@ -83,7 +84,8 @@ async def upload_files(files: List[UploadFile] = File(...)):
                     "filename": file.filename,
                     "status": "processed",
                     "content_length": len(processed_content),
-                    "preview": processed_content[:200] + "..." if len(processed_content) > 200 else processed_content
+                    "preview": processed_content[:300] + "..." if len(processed_content) > 300 else processed_content,
+                    "file_size": len(content)
                 })
                 
                 logger.info(f"Successfully processed file: {file.filename}")
@@ -99,7 +101,8 @@ async def upload_files(files: List[UploadFile] = File(...)):
                     "filename": file.filename,
                     "status": "error",
                     "error": str(e),
-                    "suggestion": "Please ensure the file is not corrupted and is in a supported format (PDF, DOCX, XLSX, CSV, TXT)"
+                    "suggestion": "Please ensure the file is not corrupted, password-protected, or in an unsupported format. Supported formats: PDF, DOCX, XLSX, CSV, TXT",
+                    "file_size": len(content)
                 })
         
         return {"files": results, "status": "success"}
