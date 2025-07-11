@@ -60,7 +60,7 @@ A comprehensive executive dashboard for IT management with AI-powered insights, 
    
    # Install dependencies
    cd backend
-   pip install -r requirements.txt
+  python -m pip install -r requirements.txt
    
    # Set up environment variables
    cp .env.example .env
